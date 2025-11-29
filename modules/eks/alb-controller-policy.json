@@ -1,0 +1,35 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "elbv2:CreateListener",
+        "elbv2:DeleteListener",
+        "elbv2:DescribeListeners",
+        "elbv2:DescribeLoadBalancers",
+        "elbv2:DescribeTargetGroups",
+        "elbv2:ModifyLoadBalancerAttributes",
+        "elbv2:ModifyTargetGroup",
+        "elbv2:ModifyTargetGroupAttributes",
+        "elbv2:RegisterTargets",
+        "elbv2:DeregisterTargets"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeNetworkInterfaces",
+        "ec2:DescribeInstances",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeTags",
+        "ec2:DescribeVpcs",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupIngress"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
