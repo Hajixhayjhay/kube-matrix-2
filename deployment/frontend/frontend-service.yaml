@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: bookreview-frontend
+  namespace: bookreview
+spec:
+  type: LoadBalancer
+  selector:
+    app: bookreview-frontend
+  ports:
+  - protocol: TCP
+    port: 80          # Public port for users
+    targetPort: 3000  # Container port

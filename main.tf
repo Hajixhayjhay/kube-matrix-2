@@ -98,3 +98,17 @@ module "database" {
 }
 
 
+#########################################
+# SSM PARAMETERS
+#########################################
+
+module "ssm_db" {
+  source      = "./modules/ssm"
+  project     = var.project
+  environment = var.environment
+
+  db_username = var.aurora_master_username
+  db_password = var.aurora_master_password
+  db_name     = var.aurora_database_name
+  db_endpoint = module.database.cluster_endpoint   # assuming your database module outputs this
+}

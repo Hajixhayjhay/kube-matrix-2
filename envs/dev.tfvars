@@ -70,3 +70,7 @@ aurora_serverless_v2_scaling_max = 4
 
 # Used by module to create secure param
 db_master_password_ssm_key = "/km/dev/db/master_password"
+db_master_username_ssm_key = "/km/dev/db/master_username"
+db_endpoint_ssm_key        = "/km/dev/db/endpoint"
+db_readonly_user_ssm_key   = "/km/dev/db/readonly_user"
+db_readonly_password_ssm_key = "/km/dev/db/readonly_password"

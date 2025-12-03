@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bookreview-backend
+  namespace: bookreview
+  labels:
+    app: bookreview-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: bookreview-backend
+  template:
+    metadata:
+      labels:
+        app: bookreview-backend
+    spec:
+      serviceAccountName: bookreview-service-account
+      volumes:
+        - name: secrets-store-inline
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: "bookreview-backend-ssm"
+      containers:
+        - name: backend
+          image: 381492049685.dkr.ecr.us-east-1.amazonaws.com/backend-repo:latest
+          ports:
+            - containerPort: 3001
+          env:
+            - name: DATABASE_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: bookreview-db-ssm
+                  key: DB_ENDPOINT
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: bookreview-db-ssm
+                  key: DB_USERNAME
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: bookreview-db-ssm
+                  key: DB_PASSWORD
+            - name: DATABASE_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: bookreview-db-ssm
+                  key: DB_NAME
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

@@ -111,7 +111,25 @@ resource "aws_iam_role_policy" "node_ssm" {
     ]
   })
 }
+resource "aws_iam_policy" "ssm_access" {
+  name        = "km-dev-ssm-access"
+  description = "Allow access to SSM parameters for km-dev project"
 
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath"
+        ]
+        Resource = "arn:aws:ssm:*:*:parameter/km-dev/*"
+      }
+    ]
+  })
+}
 # Node Group
 resource "aws_eks_node_group" "main" {
   cluster_name    = aws_eks_cluster.main.name
