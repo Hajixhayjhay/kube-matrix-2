@@ -41,7 +41,31 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 3️⃣ Terraform Init & Apply (root repo)
+      # 3️⃣ Set up Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.7.7
+
+      # 4️⃣ Set up kubectl
+      - name: Setup kubectl
+        uses: aws-actions/setup-kubectl@v3
+        with:
+          version: '1.29.0'
+
+      # 5️⃣ Set up eksctl
+      - name: Setup eksctl
+        uses: weaveworks/eksctl-action@v1
+        with:
+          version: '0.138.0'
+
+      # 6️⃣ Set up Helm
+      - name: Setup Helm
+        uses: deliverybot/helm@v1
+        with:
+          version: 'v3.12.0'
+
+      # 7️⃣ Terraform Init & Apply
       - name: Terraform Init & Apply
         run: |
           terraform init
@@ -53,51 +77,49 @@ jobs:
             -var-file="envs/prod.tfvars" \
             -auto-approve -input=false
 
-      # 4️⃣ Login to ECR
-      - name: Login to ECR
-        run: |
-          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+      # 8️⃣ Login to ECR
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v1
 
-      # 5️⃣ Tag & push backend image
+      # 9️⃣ Tag & Push backend image
       - name: Tag & Push Backend Image
         run: |
           docker tag $EXISTING_BACKEND_IMAGE $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_IMAGE:latest
           docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_IMAGE:latest
 
-      # 6️⃣ Tag & push frontend image
+      # 🔟 Tag & Push frontend image
       - name: Tag & Push Frontend Image
         run: |
           docker tag $EXISTING_FRONTEND_IMAGE $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_IMAGE:latest
           docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_IMAGE:latest
 
-      # 7️⃣ Update kubeconfig
+      # 1️⃣1️⃣ Update kubeconfig
       - name: Update kubeconfig
         run: |
           aws eks update-kubeconfig --name $EKS_CLUSTER --region $AWS_REGION
           kubectl config use-context arn:aws:eks:$AWS_REGION:$AWS_ACCOUNT_ID:cluster/$EKS_CLUSTER
 
-      # 8️⃣ Create namespace if not exists
+      # 1️⃣2️⃣ Create namespace if not exists
       - name: Create namespace
         run: |
           kubectl get namespace $NAMESPACE || kubectl create namespace $NAMESPACE
           kubectl config set-context --current --namespace=$NAMESPACE
 
-      # 9️⃣ Install Secrets Store CSI Driver
+      # 1️⃣3️⃣ Install Secrets Store CSI Driver
       - name: Install Secrets Store CSI Driver
         run: |
           helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
           helm repo update
           helm status csi-secrets-store -n $NAMESPACE || \
             helm install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --namespace $NAMESPACE
-          kubectl --namespace=$NAMESPACE get pods -l "app=secrets-store-csi-driver"
           kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/deployment/aws-provider-installer.yaml
 
-      # 🔟 Associate IAM OIDC provider
+      # 1️⃣4️⃣ Associate IAM OIDC provider
       - name: Associate IAM OIDC
         run: |
           eksctl utils associate-iam-oidc-provider --region=$AWS_REGION --cluster=$EKS_CLUSTER --approve
 
-      # 1️⃣1️⃣ Create IAM Service Account
+      # 1️⃣5️⃣ Create IAM Service Account
       - name: Create IAM Service Account
         run: |
           eksctl create iamserviceaccount \
@@ -109,12 +131,11 @@ jobs:
             --approve \
             --override-existing-serviceaccounts
 
-      # 1️⃣2️⃣ Apply database secret
+      # 1️⃣6️⃣ Apply database secret
       - name: Apply Database Secret
-        run: |
-          kubectl apply -f $DEPLOYMENT_DIR/database/secret.yaml
+        run: kubectl apply -f $DEPLOYMENT_DIR/database/secret.yaml
 
-      # 1️⃣3️⃣ Deploy backend
+      # 1️⃣7️⃣ Deploy backend
       - name: Deploy Backend
         run: |
           kubectl apply -f $DEPLOYMENT_DIR/backend/backend-deployment.yaml
@@ -122,7 +143,7 @@ jobs:
           kubectl apply -f $DEPLOYMENT_DIR/backend/backend-service.yaml
           kubectl rollout status deployment/backend
 
-      # 1️⃣4️⃣ Deploy frontend
+      # 1️⃣8️⃣ Deploy frontend
       - name: Deploy Frontend
         run: |
           kubectl apply -f $DEPLOYMENT_DIR/frontend/frontend-deployment.yaml
