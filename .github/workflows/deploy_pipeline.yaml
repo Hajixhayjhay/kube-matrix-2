@@ -1,0 +1,154 @@
+name: Full EKS CI/CD Deployment with DB Secrets
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: 381492049685
+  EKS_CLUSTER: km-dev-eks
+  NAMESPACE: bookreview
+  BACKEND_IMAGE: backend-repo
+  FRONTEND_IMAGE: frontend-repo
+  EXISTING_BACKEND_IMAGE: km-backend:latest
+  EXISTING_FRONTEND_IMAGE: km-frontend:latest
+  SERVICE_ACCOUNT_NAME: br-sa
+  SECRET_MANAGER_POLICY_ARN: arn:aws:iam::381492049685:policy/km-dev-ssm-access
+  DEPLOYMENT_DIR: deployment
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      DB_MASTER_USERNAME: ${{ secrets.DB_MASTER_USERNAME }}
+      DB_MASTER_PASSWORD: ${{ secrets.DB_MASTER_PASSWORD }}
+      DB_MASTER_PASSWORD_SSM_KEY: ${{ secrets.DB_MASTER_PASSWORD_SSM_KEY }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+
+    steps:
+      # 1️⃣ Checkout repo
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      # 2️⃣ Configure AWS credentials
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # 3️⃣ Install tools: Terraform, kubectl, eksctl, helm, Docker
+      - name: Install tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y unzip curl docker.io
+          sudo systemctl start docker
+          sudo systemctl enable docker
+
+          # Terraform
+          curl -LO https://releases.hashicorp.com/terraform/1.7.7/terraform_1.7.7_linux_amd64.zip
+          unzip terraform_1.7.7_linux_amd64.zip
+          sudo mv terraform /usr/local/bin/
+          terraform -v
+
+          # kubectl
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+          # eksctl
+          curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+          sudo mv /tmp/eksctl /usr/local/bin/
+
+          # helm
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      # 4️⃣ Terraform Init & Apply (root repo)
+      - name: Terraform Init & Apply
+        run: |
+          terraform init
+          terraform apply \
+            -var="db_master_username=${{ secrets.DB_MASTER_USERNAME }}" \
+            -var="db_master_password=${{ secrets.DB_MASTER_PASSWORD }}" \
+            -var="db_master_password_ssm_key=${{ secrets.DB_MASTER_PASSWORD_SSM_KEY }}" \
+            -var="db_name=${{ secrets.DB_NAME }}" \
+            -var-file="envs/prod.tfvars" \
+            -auto-approve -input=false
+
+      # 5️⃣ Login to ECR
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+
+      # 6️⃣ Tag & push backend image
+      - name: Tag & Push Backend Image
+        run: |
+          docker tag $EXISTING_BACKEND_IMAGE $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_IMAGE:latest
+          docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_IMAGE:latest
+
+      # 7️⃣ Tag & push frontend image
+      - name: Tag & Push Frontend Image
+        run: |
+          docker tag $EXISTING_FRONTEND_IMAGE $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_IMAGE:latest
+          docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_IMAGE:latest
+
+      # 8️⃣ Update kubeconfig
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --name $EKS_CLUSTER --region $AWS_REGION
+          kubectl config use-context arn:aws:eks:$AWS_REGION:$AWS_ACCOUNT_ID:cluster/$EKS_CLUSTER
+
+      # 9️⃣ Create namespace if not exists
+      - name: Create namespace
+        run: |
+          kubectl get namespace $NAMESPACE || kubectl create namespace $NAMESPACE
+          kubectl config set-context --current --namespace=$NAMESPACE
+
+      # 🔟 Install Secrets Store CSI Driver
+      - name: Install Secrets Store CSI Driver
+        run: |
+          helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
+          helm repo update
+          helm status csi-secrets-store -n $NAMESPACE || \
+            helm install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --namespace $NAMESPACE
+          kubectl --namespace=$NAMESPACE get pods -l "app=secrets-store-csi-driver"
+          kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/deployment/aws-provider-installer.yaml
+
+      # 1️⃣1️⃣ Associate IAM OIDC provider
+      - name: Associate IAM OIDC
+        run: |
+          eksctl utils associate-iam-oidc-provider --region=$AWS_REGION --cluster=$EKS_CLUSTER --approve
+
+      # 1️⃣2️⃣ Create IAM Service Account
+      - name: Create IAM Service Account
+        run: |
+          eksctl create iamserviceaccount \
+            --name $SERVICE_ACCOUNT_NAME \
+            --namespace $NAMESPACE \
+            --region $AWS_REGION \
+            --cluster $EKS_CLUSTER \
+            --attach-policy-arn $SECRET_MANAGER_POLICY_ARN \
+            --approve \
+            --override-existing-serviceaccounts
+
+      # 1️⃣3️⃣ Apply database secret
+      - name: Apply Database Secret
+        run: |
+          kubectl apply -f $DEPLOYMENT_DIR/database/secret.yaml
+
+      # 1️⃣4️⃣ Deploy backend
+      - name: Deploy Backend
+        run: |
+          kubectl apply -f $DEPLOYMENT_DIR/backend/backend-deployment.yaml
+          kubectl apply -f $DEPLOYMENT_DIR/backend/backend-hpa.yaml
+          kubectl apply -f $DEPLOYMENT_DIR/backend/backend-service.yaml
+          kubectl rollout status deployment/backend
+
+      # 1️⃣5️⃣ Deploy frontend
+      - name: Deploy Frontend
+        run: |
+          kubectl apply -f $DEPLOYMENT_DIR/frontend/frontend-deployment.yaml
+          kubectl apply -f $DEPLOYMENT_DIR/frontend/frontend-service.yaml
+          kubectl rollout status deployment/frontend
