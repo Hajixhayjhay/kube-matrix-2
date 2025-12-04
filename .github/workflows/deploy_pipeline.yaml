@@ -41,12 +41,10 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 3️⃣ Install tools: Terraform, kubectl, eksctl, helm, Docker
+      # 3️⃣ Install tools: Terraform, kubectl, eksctl, helm
       - name: Install tools
         run: |
-          sudo apt-get update && sudo apt-get install -y unzip curl docker.io
-          sudo systemctl start docker
-          sudo systemctl enable docker
+          sudo apt-get update && sudo apt-get install -y unzip curl
 
           # Terraform
           curl -LO https://releases.hashicorp.com/terraform/1.7.7/terraform_1.7.7_linux_amd64.zip
