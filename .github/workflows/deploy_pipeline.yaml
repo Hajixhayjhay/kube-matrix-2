@@ -1,8 +1,9 @@
-name: Full EKS CI/CD Deployment
+name: Full EKS CI/CD Deployment with DB Secrets
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
 
 env:
   AWS_REGION: us-east-1
@@ -29,46 +30,46 @@ jobs:
 
     steps:
       # 1️⃣ Checkout repo
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v3
 
       # 2️⃣ Configure AWS credentials
-      - name: Configure AWS credentials
+      - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 3️⃣ Setup Terraform
+      # 3️⃣ Set up Terraform
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: 1.7.7
 
-      # 4️⃣ Setup kubectl
+      # 4️⃣ Set up kubectl
       - name: Setup kubectl
         uses: azure/setup-kubectl@v3
         with:
           version: '1.29.0'
 
-      # 5️⃣ Setup Helm
+      # 5️⃣ Set up eksctl
+      - name: Setup eksctl
+        uses: weaveworks/eksctl-action@v1
+        with:
+          version: '0.138.0'
+
+      # 6️⃣ Set up Helm
       - name: Setup Helm
-        uses: deliverybot/helm@v1
+        uses: azure/setup-helm@v3
         with:
           version: 'v3.12.0'
-
-      # 6️⃣ Install eksctl
-      - name: Install eksctl
-        run: |
-          curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
-          sudo mv /tmp/eksctl /usr/local/bin/
 
       # 7️⃣ Terraform Init & Apply
       - name: Terraform Init & Apply
         run: |
-          terraform -chdir=./iac init
-          terraform -chdir=./iac apply \
+          terraform init
+          terraform apply \
             -var="db_master_username=${{ secrets.DB_MASTER_USERNAME }}" \
             -var="db_master_password=${{ secrets.DB_MASTER_PASSWORD }}" \
             -var="db_master_password_ssm_key=${{ secrets.DB_MASTER_PASSWORD_SSM_KEY }}" \
@@ -80,13 +81,13 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v1
 
-      # 9️⃣ Tag & push backend image
+      # 9️⃣ Tag & Push backend image
       - name: Tag & Push Backend Image
         run: |
           docker tag $EXISTING_BACKEND_IMAGE $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_IMAGE:latest
           docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$BACKEND_IMAGE:latest
 
-      # 🔟 Tag & push frontend image
+      # 🔟 Tag & Push frontend image
       - name: Tag & Push Frontend Image
         run: |
           docker tag $EXISTING_FRONTEND_IMAGE $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$FRONTEND_IMAGE:latest
@@ -98,7 +99,7 @@ jobs:
           aws eks update-kubeconfig --name $EKS_CLUSTER --region $AWS_REGION
           kubectl config use-context arn:aws:eks:$AWS_REGION:$AWS_ACCOUNT_ID:cluster/$EKS_CLUSTER
 
-      # 1️⃣2️⃣ Create namespace
+      # 1️⃣2️⃣ Create namespace if not exists
       - name: Create namespace
         run: |
           kubectl get namespace $NAMESPACE || kubectl create namespace $NAMESPACE
@@ -111,7 +112,6 @@ jobs:
           helm repo update
           helm status csi-secrets-store -n $NAMESPACE || \
             helm install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --namespace $NAMESPACE
-          kubectl --namespace=$NAMESPACE get pods -l "app=secrets-store-csi-driver"
           kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/deployment/aws-provider-installer.yaml
 
       # 1️⃣4️⃣ Associate IAM OIDC provider
@@ -133,8 +133,7 @@ jobs:
 
       # 1️⃣6️⃣ Apply database secret
       - name: Apply Database Secret
-        run: |
-          kubectl apply -f $DEPLOYMENT_DIR/database/secret.yaml
+        run: kubectl apply -f $DEPLOYMENT_DIR/database/secret.yaml
 
       # 1️⃣7️⃣ Deploy backend
       - name: Deploy Backend
