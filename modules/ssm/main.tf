@@ -29,3 +29,4 @@ resource "aws_ssm_parameter" "db_name" {
   value     = var.db_name
   overwrite = true
 }
+

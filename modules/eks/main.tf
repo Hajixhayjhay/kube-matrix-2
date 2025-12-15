@@ -130,6 +130,39 @@ resource "aws_iam_policy" "ssm_access" {
     ]
   })
 }
+
+
+resource "aws_iam_role" "br_sa_role" {
+  name = "${local.name_prefix}-br-sa-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.cluster.arn
+        }
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Condition = {
+          StringEquals = {
+            # Must match your service account namespace and name
+            "${replace(aws_iam_openid_connect_provider.cluster.url, "https://", "")}:sub" = "system:serviceaccount:bookreview:br-sa"
+          }
+        }
+      }
+    ]
+  })
+  
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "br_sa_ssm_policy_attach" {
+  role       = aws_iam_role.br_sa_role.name
+  policy_arn = aws_iam_policy.ssm_access.arn
+}
+
 # Node Group
 resource "aws_eks_node_group" "main" {
   cluster_name    = aws_eks_cluster.main.name
